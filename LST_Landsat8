@@ -1,0 +1,78 @@
+//Define Study Area and Dates
+//Import study area boundary shapefile from assets
+var startDate='2024-05-01';
+var endDate = '2025-10-31';
+Map.centerObject=(Janla,10);
+//Load Landsat 8 Level-1 Image:
+var l8= ee.ImageCollection('LANDSAT/LC08/C02/T1')
+ .filterBounds(Janla)
+ .filterDate(startDate,endDate)
+ .first();
+print('Selected Landsat 8 image:');
+//Convert Thermal Band (B10) to Brightness Temperature (BT)
+var rad_mult=ee.Number(l8.get('RADIANCE_MULT_BAND_10'));
+var rad_add=ee.Number(l8.get('RADIANCE_ADD_BAND_10'));
+var k1=ee.Number(l8.get('K1_CONSTANT_BAND_10'));
+var k2=ee.Number(l8.get('K2_CONSTANT_BAND_10'));
+//Calculate Spectral Radiance:
+var radiance= l8.select('B10').multiply(rad_mult).add(rad_add).rename('Radiance');
+//Compute Brightness Temperature (Kelvin):
+var btKelvin=radiance.expression(
+ 'K2 / log(K1 / L + 1)', {
+  'K1': k1,
+  'K2': k2,
+  'L': radiance
+  }).rename('BT_K');
+//Convert to Celsius:
+var btCelsius = btKelvin.subtract(273.15).rename('BT_C');
+//Step 4: Calculate NDVI
+var nir=l8.select('B5');
+var red=l8.select('B4');
+var ndvi=nir.subtract(red).divide(nir.add(red)).rename('NDVI');
+Map.centerObject(Janla);
+Map.addLayer(ndvi.clip(Janla), {min:-1, max:1, palette:['blue','white','green']}, 'NDVI');
+//Estimate emissivity
+var region = l8.geometry().buffer(10000);
+var ndviStats = ndvi.reduceRegion({
+reducer: ee.Reducer.minMax(),
+geometry: region,
+scale: 30,
+maxPixels: 1e9
+});
+var ndviMin = ee.Number(ee.Algorithms.If(ndviStats.get('NDVI_min'), ndviStats.get('NDVI_min'), -
+0.2));
+var ndviMax = ee.Number(ee.Algorithms.If(ndviStats.get('NDVI_max'), ndviStats.get('NDVI_max'),
+0.8));
+var pv = ndvi.subtract(ndviMin).divide(ndviMax.subtract(ndviMin)).pow(2).rename('Pv');
+var emissivity = pv.multiply(0.004).add(0.986).rename('Emissivity');
+//Step 6: Compute Land Surface Temperature (LST)
+var eps = emissivity.clamp(0.0001, 1);
+var ln_eps = eps.log();
+var factor = btKelvin.multiply(0.00115).divide(1.4388);
+var denom = factor.multiply(ln_eps).add(1);
+var lstKelvin = btKelvin.divide(denom).rename('LST_K');
+var lstCelsius = lstKelvin.subtract(273.15).rename('LST_C');
+//Step 7: Visualize the LST Map
+var lstViz = {
+min: -10,
+max: 45,
+palette: ['navy', 'dodgerblue', 'cyan', 'chartreuse', 'yellow', 'red']
+};
+Map.addLayer(lstCelsius.clip(Janla), lstViz, 'LST (°C)');
+//Step 8: Analyze and Export
+var stats = lstCelsius.reduceRegion({
+reducer: ee.Reducer.mean().combine(ee.Reducer.min(), '', true).combine(ee.Reducer.max(), '',
+true),
+geometry: region,
+scale: 30,
+maxPixels: 1e9
+});
+print('LST Stats (°C):', stats);
+Export.image.toDrive({
+image: lstCelsius,
+description: 'LST_Landsat8',
+folder: 'EarthEngineExports',
+scale: 30,
+region: region,
+maxPixels: 1e10
+});
