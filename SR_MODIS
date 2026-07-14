@@ -1,1 +1,36 @@
+var Janla = ee.FeatureCollection("projects/lab-3-470105/assets/Janla");
+// Define AOI 
+var modis = ee.ImageCollection('MODIS/061/MOD09GA')
+  .filterBounds(Janla)
+  .filterDate('2024-10-01', '2024-12-31');
+
+var modis_img = modis.mean();
+
+// Select visible RGB-like bands
+var rgb = modis_img.select(['sur_refl_b01', 'sur_refl_b04', 'sur_refl_b03']);  
+// (Red, Green, Blue)
+
+// Visualization (MODIS reflectance scale = 0–10000)
+var vis = {
+  min: 0,
+  max: 4000,
+  gamma: 1.2
+};
+
+// Add layer to map
+Map.addLayer(rgb.clip(Janla), vis, "MODIS RGB");
+
+// Center map on AOI
+Map.centerObject(Janla, 8);
+
+// -------- EXPORT ----------
+Export.image.toDrive({
+  image: modis_img.clip(Janla),
+  description: 'MODIS_SR_Janla',
+  folder: 'Earth Engine',
+  fileNamePrefix: 'MODIS_SR_Janla',
+  scale: 500,
+  region: N24pgs,
+  fileFormat: 'GeoTIFF'
+});
 
