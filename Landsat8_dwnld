@@ -1,0 +1,77 @@
+// Center map
+Map.centerObject(roi, 10);
+
+var startDate = '2023-01-01';
+var endDate   = '2023-12-31';
+
+// Load Landsat 8 Collection 2 Level-2
+var l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+            .filterBounds(roi)
+            .filterDate(startDate, endDate)
+            .filter(ee.Filter.lt('CLOUD_COVER', 10));
+
+// Apply Scale Factors
+function applyScaleFactors(image) {
+
+  // Surface Reflectance bands
+  var optical = image.select('SR_B.*')
+                     .multiply(0.0000275)
+                     .add(-0.2);
+
+  // Thermal band
+  var thermal = image.select('ST_B10')
+                     .multiply(0.00341802)
+                     .add(149.0);
+
+  return image
+      .addBands(optical, null, true)
+      .addBands(thermal, null, true);
+}
+
+var collection = l8.map(applyScaleFactors);
+
+// Create Median Composite
+var image = collection.median().clip(roi);
+
+// Display
+Map.addLayer(image,
+{
+  bands:['SR_B4','SR_B3','SR_B2'],
+  min:0,
+  max:0.3
+},
+'True Color');
+
+Map.addLayer(image,
+{
+  bands:['SR_B5','SR_B4','SR_B3'],
+  min:0,
+  max:0.3
+},
+'False Color');
+
+// Print Image Information
+print('Number of Images:', collection.size());
+print(collection);
+
+
+// Export to Google Drive
+Export.image.toDrive({
+  image: image.select([
+    'SR_B1',
+    'SR_B2',
+    'SR_B3',
+    'SR_B4',
+    'SR_B5',
+    'SR_B6',
+    'SR_B7',
+    'ST_B10'
+  ]),
+  description: 'Landsat8_2023',
+  folder: 'GEE_Exports',
+  fileNamePrefix: 'Landsat8_2023',
+  region: roi.geometry(),
+  scale: 30,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
