@@ -1,0 +1,34 @@
+// Load dataset
+var states = ee.FeatureCollection("TIGER/2018/States");
+
+// Filter Texas
+var texas = states.filter(ee.Filter.eq('NAME', 'Texas')).first();
+
+// Function to extract only polygons
+var geom = texas.geometry();
+var polys = geom.geometries().map(function(g) {
+  g = ee.Geometry(g);
+  return ee.Algorithms.If(
+    g.type().compareTo('Polygon').eq(0)
+      .or(g.type().compareTo('MultiPolygon').eq(0)),
+    g,
+    null
+  );
+});
+
+// Remove nulls and rebuild geometry
+polys = ee.List(polys).removeAll([null]);
+var texasPoly = ee.FeatureCollection(
+  polys.map(function(g){ return ee.Feature(ee.Geometry(g)); })
+);
+
+// Display
+Map.centerObject(texasPoly, 6);
+Map.addLayer(texasPoly, {color:'red'}, 'Texas');
+
+// Export shapefile
+Export.table.toDrive({
+  collection: texasPoly,
+  description: 'Texas_polygon_only',
+  fileFormat: 'SHP'
+});
